@@ -12,19 +12,18 @@
  */
 
 / {
-	chosen {
-		/* shared memory reserved for the inter-processor communication */
-		zephyr,ipc_shm = &sram0_shared;
-	};
-
 	reserved-memory {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
 
-		sram0_shared: memory@20070000 {
+		sram0_shared_to_net: memory@20070000 {
 			/* SRAM allocated to shared memory */
-			reg = <0x20070000 0x10000>;
+			reg = <0x20070000 0x8000>;
+		};
+		sram0_shared_to_app: memory@20078000 {
+			/* SRAM allocated to shared memory */
+			reg = <0x20078000 0x8000>;
 		};
 	};
 };

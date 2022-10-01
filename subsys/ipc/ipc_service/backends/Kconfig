@@ -30,7 +30,7 @@ config IPC_SERVICE_BACKEND_ICMSG
 config IPC_SERVICE_BACKEND_ICMSG_ME_INITIATOR
 	bool "ICMSG backend with multi-endpoint support in initiator role"
 	depends on MBOX
-	default $(dt_compat_enabled,$(DT_COMPAT_ZEPHYR_IPC_ICMSG_ME_INIT))
+	default DT_HAS_ZEPHYR_IPC_ICMSG_ME_INITIATOR_ENABLED
 	select ICMSG
 	select EVENTS
 	help
@@ -41,7 +41,7 @@ config IPC_SERVICE_BACKEND_ICMSG_ME_INITIATOR
 config IPC_SERVICE_BACKEND_ICMSG_ME_FOLLOWER
 	bool "ICMSG backend with multi-endpoint support in follower role"
 	depends on MBOX
-	default $(dt_compat_enabled,$(DT_COMPAT_ZEPHYR_IPC_ICMSG_ME_FLW))
+	default DT_HAS_ZEPHYR_IPC_ICMSG_ME_FOLLOWER_ENABLED
 	select ICMSG
 	select EVENTS
 	help
