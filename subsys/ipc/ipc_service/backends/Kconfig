@@ -22,8 +22,7 @@ config IPC_SERVICE_BACKEND_ICMSG
 	bool "ICMSG backend with SPSC packet buffer"
 	depends on MBOX
 	default $(dt_compat_enabled,$(DT_COMPAT_ZEPHYR_IPC_ICMSG))
-	select SPSC_PBUF
-	select SPSC_PBUF_USE_CACHE
+	select ICMSG
 	help
 	  Chosing this backend results in single endpoint implementation based
 	  on circular packet buffer.
@@ -45,5 +44,4 @@ config IPC_SERVICE_STATIC_VRINGS_ALIGNMENT
 	help
 	  Static VRINGs alignment
 
-rsource "Kconfig.icmsg"
 rsource "Kconfig.rpmsg"

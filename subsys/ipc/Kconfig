@@ -8,4 +8,25 @@ menu "Inter Processor Communication"
 source "subsys/ipc/rpmsg_service/Kconfig"
 source "subsys/ipc/ipc_service/Kconfig"
 
+config ICMSG
+	bool
+	select SPSC_PBUF
+	select SPSC_PBUF_USE_CACHE
+	help
+	  If icmsg library is to be included in the build
+
 endmenu
+
+if ICMSG
+
+config ICMSG_CB_BUF_SIZE
+	int "Size of callback buffer size"
+	range 1 65535
+	default 255
+	help
+	  Size of callback buffer used for processing received data in work
+	  queue thread. If you are sure that your application never sends data
+	  data bigger than some size, you can safely change this option to
+	  reduce RAM consumption in your application.
+
+endif # ICMSG

@@ -2,3 +2,5 @@
 
 add_subdirectory_ifdef(CONFIG_RPMSG_SERVICE rpmsg_service)
 add_subdirectory_ifdef(CONFIG_IPC_SERVICE ipc_service)
+
+zephyr_sources_ifdef(CONFIG_ICMSG icmsg.c)
