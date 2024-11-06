@@ -43,6 +43,7 @@ extern "C" {
 #define RXFLR_RXTFL_MASK	GENMASK(7, 0)
 
 #define SR_BUSY_BIT	        BIT(0)
+#define SR_TFNF_BIT	        BIT(1)
 
 #define IMR_TXEIM_BIT		BIT(0)
 #define IMR_TXOIM_BIT		BIT(1)

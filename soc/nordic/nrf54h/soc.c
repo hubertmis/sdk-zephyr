@@ -88,6 +88,7 @@ static void power_domain_init(void)
 
 static int trim_hsfll(void)
 {
+	printk("Trimming HSFLL\n");
 #if defined(HSFLL_NODE)
 
 	NRF_HSFLL_Type *hsfll = (NRF_HSFLL_Type *)DT_REG_ADDR(HSFLL_NODE);

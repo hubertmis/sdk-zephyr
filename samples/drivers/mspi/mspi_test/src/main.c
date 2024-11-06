@@ -11,6 +11,7 @@
 #include <zephyr/devicetree.h>
 #include <stdio.h>
 #include <string.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
 #include <zephyr/drivers/mspi.h>
 
 #define MSPI_BUS                  DT_BUS(DT_ALIAS(dev0))
@@ -24,7 +25,7 @@ uint8_t one_wire_params[] = {0x5a, 0xdb};
 
 const uint8_t data_block_cmd = 0x32;
 const uint32_t data_block_address = 0x002c00;
-uint8_t data_block_data[256];
+uint8_t data_block_data[512];
 
 const struct mspi_xfer_packet one_wire_packet[] = {
 	{
@@ -62,14 +63,56 @@ const struct mspi_xfer data_block_xfer = {
 	.priority                   = 1,
 	.packets                    = data_block_packet,
 	.num_packet                 = 1,
+	.timeout                    = 10000,
 };
+
+enum {
+	TIMESTAMP_BEFORE_ONE_WIRE,
+	TIMESTAMP_AFTER_ONE_WIRE,
+	TIMESTAMP_BEFORE_DATA_BLOCK,
+	TIMESTAMP_AFTER_DATA_BLOCK,
+
+	NUM_TIMESTAMPS,
+};
+
+static volatile bool clock_is_set;
+
+static void clk_callback(struct onoff_manager *srv,
+		     struct onoff_client *cli,
+		     uint32_t state,
+		     int res)
+{
+	clock_is_set = true;
+}
 
 int main(void)
 {
 	const struct device *controller = DEVICE_DT_GET(MSPI_BUS);
 	struct mspi_dev_id dev_id = MSPI_DEVICE_ID_DT(MSPI_TARGET);
 	int ret;
+	uint32_t timestamps[NUM_TIMESTAMPS];
 
+	const struct nrf_clock_spec hsfll_spec = {
+		.frequency = MHZ(320),
+	};
+	const struct device *clk_dev = DEVICE_DT_GET(DT_NODELABEL(cpuapp_hsfll));
+	struct onoff_client cli = {0};
+	sys_notify_init_callback(&cli.notify, clk_callback);
+
+	ret = nrf_clock_control_request(clk_dev, &hsfll_spec, &cli);
+	if (ret) {
+		printk("Failed to request clock: %d\n", ret);
+		return 1;
+	}
+	while (!clock_is_set);
+	k_sleep(K_MSEC(1000));
+
+	printk("FICR trim 320: %x %x\n", *(uint32_t *)0x0FFFE3CC, *(uint32_t *)0x0FFFE3E4);
+	printk("FICR trim 256: %x %x\n", *(uint32_t *)0x0FFFE3D0, *(uint32_t *)0x0FFFE3E8);
+	printk("FICR trim 128: %x %x\n", *(uint32_t *)0x0FFFE3D4, *(uint32_t *)0x0FFFE3EC);
+	printk("FICR trim  64: %x %x\n", *(uint32_t *)0x0FFFE3D8, *(uint32_t *)0x0FFFE3F0);
+	printk("FICR trim ZBB: %x %x\n", *(uint32_t *)0x0FFFE3DC, *(uint32_t *)0x0FFFE3F4);
+	printk("HSFLL trim: %x %x\n", *(uint32_t *)0x5200D444, *(uint32_t *)0x5200D448);
 	/* Initialize write buffer */
 	for (int i = 0; i < ARRAY_SIZE(data_block_data); i++) {
 		data_block_data[i] = (uint8_t)i;
@@ -95,7 +138,9 @@ int main(void)
 		return 1;
 	}
 
+	timestamps[TIMESTAMP_BEFORE_ONE_WIRE] = k_uptime_get();
 	ret = mspi_transceive(controller, &dev_id, &one_wire_xfer);
+	timestamps[TIMESTAMP_AFTER_ONE_WIRE] = k_uptime_get();
 	if (ret) {
 		printk("Failed to send configuration\n");
 		return 1;
@@ -114,13 +159,20 @@ int main(void)
 		return 1;
 	}
 
+	timestamps[TIMESTAMP_BEFORE_DATA_BLOCK] = k_uptime_get();
 	ret = mspi_transceive(controller, &dev_id, &data_block_xfer);
+	timestamps[TIMESTAMP_AFTER_DATA_BLOCK] = k_uptime_get();
 	if (ret) {
 		printk("Failed to send data\n");
 		return 1;
 	}
 
 	printk("MSPI test completed\n");
+
+	printk("Stats:\n");
+	printk("One wire: %u ms\n", timestamps[TIMESTAMP_AFTER_ONE_WIRE] - timestamps[TIMESTAMP_BEFORE_ONE_WIRE]);
+	printk("Data block: %u ms\n", timestamps[TIMESTAMP_AFTER_DATA_BLOCK] - timestamps[TIMESTAMP_BEFORE_DATA_BLOCK]);
+	printk("Throughput: %u bytes/s\n", sizeof(data_block_data) * 1000 / (timestamps[TIMESTAMP_AFTER_DATA_BLOCK] - timestamps[TIMESTAMP_BEFORE_DATA_BLOCK]));
 
 	return 0;
 }

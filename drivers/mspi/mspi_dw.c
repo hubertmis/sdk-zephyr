@@ -18,9 +18,13 @@ LOG_MODULE_REGISTER(mspi_dw, CONFIG_MSPI_LOG_LEVEL);
 
 #include "mspi_dw.h"
 
+static int set_bytes_per_transfer_in_ctrlr0(const struct device *dev,
+		uint8_t bytes_per_transfer);
+
 struct mspi_dw_data {
 	struct mspi_xfer xfer;
 	struct mspi_dev_id dev_id;
+	uint32_t ctrlr0;
 	uint32_t packets_done;
 	uint16_t bytes_done;
 	uint16_t rx_tx_cnt;
@@ -140,22 +144,48 @@ static bool make_rx_cycles(const struct device *dev)
 	return false;
 }
 
+static bool address_is_aligned_to_word(void *addr)
+{
+	return !((uintptr_t)addr & 0x3);
+}
+
+static bool size_is_multiple_of_word(size_t size)
+{
+	return !(size & 0x3);
+}
+
 static void tx_data(const struct device *dev,
 		    const struct mspi_xfer_packet *packet)
 {
 	struct mspi_dw_data *dev_data = dev->data;
 	const struct mspi_dw_config *dev_config = dev->config;
 
-	do {
-		write_dr(dev, packet->data_buf[dev_data->bytes_done]);
+	uint8_t bytes_per_write;
 
-		++dev_data->bytes_done;
-		if (dev_data->bytes_done >= packet->num_bytes) {
-			write_txftlr(dev, 0);
-			break;
+	if (address_is_aligned_to_word(packet->data_buf) &&
+	    size_is_multiple_of_word(packet->num_bytes)) {
+		bytes_per_write = 4;
+	} else {
+		bytes_per_write = 1;
+	}
+
+	write_txftlr(dev, 0);
+
+	bool finished = false;
+	do {
+		for (int i = 0; i < 16; i++) {
+			write_dr(dev, *(uint32_t *)&packet->data_buf[dev_data->bytes_done]);
+
+			dev_data->bytes_done += bytes_per_write;
+			if (dev_data->bytes_done >= packet->num_bytes) {
+				write_txftlr(dev, 0);
+				finished = true;
+				break;
+			}
 		}
-	} while (FIELD_GET(TXFLR_TXTFL_MASK, read_txflr(dev)) <
-		 dev_config->tx_fifo_depth);
+		while(FIELD_GET(TXFLR_TXTFL_MASK, read_txflr(dev)) >= 15) {
+		}
+	} while (!finished);//read_sr(dev) & SR_TFNF_BIT);
 }
 
 static void mspi_dw_isr(const struct device *dev)
@@ -165,10 +195,13 @@ static void mspi_dw_isr(const struct device *dev)
 		&dev_data->xfer.packets[dev_data->packets_done];
 	uint32_t int_status = read_isr(dev);
 
+#if 1
 	if (int_status & ISR_RXFIS_BIT) {
 		read_rx_fifo(dev, packet);
 	}
+#endif
 
+#if 1
 	if (dev_data->bytes_done >= packet->num_bytes) {
 		write_imr(dev, 0);
 		/* It may happen that the controller still shifts out the last
@@ -180,6 +213,9 @@ static void mspi_dw_isr(const struct device *dev)
 
 		k_sem_give(&dev_data->finished);
 	} else {
+#else
+	{
+#endif
 		if (int_status & ISR_TXEIS_BIT) {
 			if (dev_data->rx_tx_cnt) {
 				if (make_rx_cycles(dev)) {
@@ -205,9 +241,10 @@ static int api_config(const struct mspi_dt_spec *spec)
 }
 
 static int apply_io_mode(const struct device *dev, enum mspi_io_mode io_mode,
-			 uint32_t *ctrlr0, uint32_t *spi_ctrlr0)
+			 uint32_t *spi_ctrlr0)
 {
 	struct mspi_dw_data *dev_data = dev->data;
+	uint32_t *ctrlr0 = &dev_data->ctrlr0;
 
 	/* Frame format used for transferring data. */
 
@@ -303,6 +340,34 @@ static int apply_addr_length(uint32_t *spi_ctrlr0, uint32_t addr_length)
 	return 0;
 }
 
+static int set_bytes_per_transfer_in_ctrlr0(const struct device *dev,
+		uint8_t bytes_per_transfer)
+{
+	struct mspi_dw_data *dev_data = dev->data;
+	uint32_t *ctrlr0 = &dev_data->ctrlr0;
+
+	switch (bytes_per_transfer)
+	{
+	case 1:
+		/* Use 8-bit data frame size. */
+		*ctrlr0 &= ~CTRLR0_DFS_MASK;
+		*ctrlr0 |= FIELD_PREP(CTRLR0_DFS_MASK, 7);
+		break;
+
+	case 4:
+		/* Use 32-bit data frame size. */
+		*ctrlr0 &= ~CTRLR0_DFS_MASK;
+		*ctrlr0 |= FIELD_PREP(CTRLR0_DFS_MASK, 31);
+		break;
+	
+	default:
+		return -EINVAL;
+	}
+
+	write_ctrlr0(dev, *ctrlr0);
+	return 0;
+}
+
 static int api_dev_config(const struct device *dev,
 			  const struct mspi_dev_id *dev_id,
 			  const enum mspi_dev_cfg_mask param_mask,
@@ -310,7 +375,7 @@ static int api_dev_config(const struct device *dev,
 {
 	const struct mspi_dw_config *dev_config = dev->config;
 	struct mspi_dw_data *dev_data = dev->data;
-	uint32_t ctrlr0 = 0;
+	uint32_t *ctrlr0 = &dev_data->ctrlr0;
 	uint32_t spi_ctrlr0 = 0;
 	int rc;
 
@@ -343,7 +408,7 @@ static int api_dev_config(const struct device *dev,
 	}
 
 	if (param_mask & MSPI_DEVICE_CONFIG_IO_MODE) {
-		rc = apply_io_mode(dev, cfg->io_mode, &ctrlr0, &spi_ctrlr0);
+		rc = apply_io_mode(dev, cfg->io_mode, &spi_ctrlr0);
 		if (rc < 0) {
 			return rc;
 		}
@@ -353,19 +418,19 @@ static int api_dev_config(const struct device *dev,
 		switch (cfg->cpp) {
 		default:
 		case MSPI_CPP_MODE_0:
-			ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 0) |
+			*ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 0) |
 				  FIELD_PREP(CTRLR0_SCPH_BIT,  0);
 			break;
 		case MSPI_CPP_MODE_1:
-			ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 0) |
+			*ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 0) |
 				  FIELD_PREP(CTRLR0_SCPH_BIT,  1);
 			break;
 		case MSPI_CPP_MODE_2:
-			ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 1) |
+			*ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 1) |
 				  FIELD_PREP(CTRLR0_SCPH_BIT,  0);
 			break;
 		case MSPI_CPP_MODE_3:
-			ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 1) |
+			*ctrlr0 |= FIELD_PREP(CTRLR0_SCPOL_BIT, 1) |
 				  FIELD_PREP(CTRLR0_SCPH_BIT,  1);
 			break;
 		}
@@ -422,13 +487,16 @@ static int api_dev_config(const struct device *dev,
 		dev_data->addr_length = cfg->addr_length;
 	}
 
-	/* Always use Motorola SPI frame format and 8-bit data frame size. */
-	ctrlr0 |= FIELD_PREP(CTRLR0_FRF_MASK, CTRLR0_FRF_SPI)
-	       |  FIELD_PREP(CTRLR0_DFS_MASK, 7);
+	/* Always use Motorola SPI frame format */
+	*ctrlr0 |= FIELD_PREP(CTRLR0_FRF_MASK, CTRLR0_FRF_SPI);
 
 	spi_ctrlr0 |= FIELD_PREP(SPI_CTRLR0_CLK_STRETCH_EN_MASK, 1);
 
-	write_ctrlr0(dev, ctrlr0);
+	rc = set_bytes_per_transfer_in_ctrlr0(dev, 1);
+	if (rc < 0) {
+		return rc;
+	}
+
 	write_spi_ctrlr0(dev, spi_ctrlr0);
 
 	dev_data->dev_id = *dev_id;
@@ -460,7 +528,7 @@ static int start_next_packet(const struct device *dev,
 	struct mspi_dw_data *dev_data = dev->data;
 	const struct mspi_xfer_packet *packet =
 		&dev_data->xfer.packets[dev_data->packets_done];
-	uint32_t ctrlr0 = read_ctrlr0(dev);
+	uint32_t *ctrlr0 = &dev_data->ctrlr0;
 	uint32_t spi_ctrlr0 = read_spi_ctrlr0(dev);
 	uint8_t tx_fifo_threshold;
 	uint32_t imr;
@@ -473,7 +541,7 @@ static int start_next_packet(const struct device *dev,
 
 	dev_data->rx_tx_cnt = 0;
 
-	ctrlr0 &= ~CTRLR0_TMOD_MASK;
+	*ctrlr0 &= ~CTRLR0_TMOD_MASK;
 	spi_ctrlr0 &= ~SPI_CTRLR0_WAIT_CYCLES_MASK;
 
 	/* Set the transfer start level to maximum so that the transfer does
@@ -484,7 +552,7 @@ static int start_next_packet(const struct device *dev,
 
 	if (packet->dir == MSPI_TX || packet->num_bytes == 0) {
 		imr = IMR_TXEIM_BIT;
-		ctrlr0 |= FIELD_PREP(CTRLR0_TMOD_MASK, CTRLR0_TMOD_TX);
+		*ctrlr0 |= FIELD_PREP(CTRLR0_TMOD_MASK, CTRLR0_TMOD_TX);
 		spi_ctrlr0 |= FIELD_PREP(SPI_CTRLR0_WAIT_CYCLES_MASK,
 					 dev_data->xfer.tx_dummy);
 
@@ -516,7 +584,7 @@ static int start_next_packet(const struct device *dev,
 				    dev_config->rx_fifo_threshold);
 		}
 
-		ctrlr0 |= FIELD_PREP(CTRLR0_TMOD_MASK, tmod);
+		*ctrlr0 |= FIELD_PREP(CTRLR0_TMOD_MASK, tmod);
 		spi_ctrlr0 |= FIELD_PREP(SPI_CTRLR0_WAIT_CYCLES_MASK,
 					 dev_data->xfer.rx_dummy);
 
@@ -524,7 +592,14 @@ static int start_next_packet(const struct device *dev,
 					     rx_fifo_threshold));
 	}
 
-	write_ctrlr0(dev, ctrlr0);
+	if (packet->num_bytes &&
+		address_is_aligned_to_word(packet->data_buf) &&
+		size_is_multiple_of_word(packet->num_bytes)) {
+		set_bytes_per_transfer_in_ctrlr0(dev, 4);
+	} else {
+		write_ctrlr0(dev, *ctrlr0);
+	}
+
 	write_ctrlr1(dev, packet->num_bytes > 0
 		? FIELD_PREP(CTRLR1_NDF_MASK, packet->num_bytes - 1)
 		: 0);
@@ -579,6 +654,8 @@ static int start_next_packet(const struct device *dev,
 
 	/* Disable the controller. Any transfers will stop immediately. */
 	write_ssienr(dev, 0);
+
+	set_bytes_per_transfer_in_ctrlr0(dev, 1);
 
 	if (dev_data->dev_id.ce.port) {
 		gpio_pin_set_dt(&dev_data->dev_id.ce, 0);
