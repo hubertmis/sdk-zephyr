@@ -154,6 +154,7 @@ static bool size_is_multiple_of_word(size_t size)
 	return !(size & 0x3);
 }
 
+__attribute__((optimize("unroll-loops")))
 static void tx_data(const struct device *dev,
 		    const struct mspi_xfer_packet *packet)
 {
@@ -173,17 +174,23 @@ static void tx_data(const struct device *dev,
 
 	bool finished = false;
 	do {
-		for (int i = 0; i < 16; i++) {
+		if (bytes_per_write == 4 && dev_data->bytes_done + 16*bytes_per_write <= packet->num_bytes) {
+			while(FIELD_GET(TXFLR_TXTFL_MASK, read_txflr(dev)) >= 15) {
+			}
+			for (int i = 0; i < 16; i++) {
+				write_dr(dev, *(uint32_t *)&packet->data_buf[dev_data->bytes_done + i]);
+			}
+			dev_data->bytes_done += 16 * bytes_per_write;
+		} else {
 			write_dr(dev, *(uint32_t *)&packet->data_buf[dev_data->bytes_done]);
 
 			dev_data->bytes_done += bytes_per_write;
-			if (dev_data->bytes_done >= packet->num_bytes) {
-				write_txftlr(dev, 0);
-				finished = true;
-				break;
-			}
 		}
-		while(FIELD_GET(TXFLR_TXTFL_MASK, read_txflr(dev)) >= 15) {
+
+		if (dev_data->bytes_done >= packet->num_bytes) {
+			write_txftlr(dev, 0);
+			finished = true;
+			break;
 		}
 	} while (!finished);//read_sr(dev) & SR_TFNF_BIT);
 }
@@ -204,12 +211,17 @@ static void mspi_dw_isr(const struct device *dev)
 #if 1
 	if (dev_data->bytes_done >= packet->num_bytes) {
 		write_imr(dev, 0);
-		/* It may happen that the controller still shifts out the last
-		 * frame (the last interrupt occurs when the TX fifo is empty).
-		 * Wait if it still signals that it is busy.
-		 */
-		while (read_sr(dev) & SR_BUSY_BIT) {
-		}
+		if ((dev_data->ctrlr0 & CTRLR0_DFS_MASK) != FIELD_PREP(CTRLR0_DFS_MASK, 31)) {
+			/* It may happen that the controller still shifts out the last
+			* frame (the last interrupt occurs when the TX fifo is empty).
+			* Wait if it still signals that it is busy.
+			*
+			* For an unknown reason, the controller stays busy if transfering in words.
+			* FIXME!
+			*/
+			while (read_sr(dev) & SR_BUSY_BIT) {
+			}
+		};
 
 		k_sem_give(&dev_data->finished);
 	} else {

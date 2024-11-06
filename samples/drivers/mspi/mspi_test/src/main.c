@@ -25,7 +25,10 @@ uint8_t one_wire_params[] = {0x5a, 0xdb};
 
 const uint8_t data_block_cmd = 0x32;
 const uint32_t data_block_address = 0x002c00;
-uint8_t data_block_data[512];
+//uint8_t data_block_data[512];
+// Place data in local RAM to speed up access
+uint8_t *const data_block_data = (uint8_t *)0x22000000;
+#define DATA_SIZE 512
 
 const struct mspi_xfer_packet one_wire_packet[] = {
 	{
@@ -42,7 +45,7 @@ const struct mspi_xfer_packet data_block_packet[] = {
 		.dir                = MSPI_TX,
 		.cmd                = data_block_cmd,
 		.address            = data_block_address,
-		.num_bytes          = sizeof(data_block_data),
+		.num_bytes          = DATA_SIZE,
 		.data_buf           = data_block_data,
 	},
 };
@@ -75,6 +78,7 @@ enum {
 	NUM_TIMESTAMPS,
 };
 
+#if DVFS
 static volatile bool clock_is_set;
 
 static void clk_callback(struct onoff_manager *srv,
@@ -84,6 +88,7 @@ static void clk_callback(struct onoff_manager *srv,
 {
 	clock_is_set = true;
 }
+#endif
 
 int main(void)
 {
@@ -92,6 +97,7 @@ int main(void)
 	int ret;
 	uint32_t timestamps[NUM_TIMESTAMPS];
 
+ #if DVFS
 	const struct nrf_clock_spec hsfll_spec = {
 		.frequency = MHZ(320),
 	};
@@ -106,6 +112,7 @@ int main(void)
 	}
 	while (!clock_is_set);
 	k_sleep(K_MSEC(1000));
+#endif
 
 	printk("FICR trim 320: %x %x\n", *(uint32_t *)0x0FFFE3CC, *(uint32_t *)0x0FFFE3E4);
 	printk("FICR trim 256: %x %x\n", *(uint32_t *)0x0FFFE3D0, *(uint32_t *)0x0FFFE3E8);
@@ -114,12 +121,12 @@ int main(void)
 	printk("FICR trim ZBB: %x %x\n", *(uint32_t *)0x0FFFE3DC, *(uint32_t *)0x0FFFE3F4);
 	printk("HSFLL trim: %x %x\n", *(uint32_t *)0x5200D444, *(uint32_t *)0x5200D448);
 	/* Initialize write buffer */
-	for (int i = 0; i < ARRAY_SIZE(data_block_data); i++) {
+	for (int i = 0; i < DATA_SIZE; i++) {
 		data_block_data[i] = (uint8_t)i;
 	}
 
 	// TODO: cache should be handled by the driver. Is this code needed here?
-	ret = sys_cache_data_flush_range(data_block_data, sizeof(data_block_data));
+	ret = sys_cache_data_flush_range(data_block_data, DATA_SIZE);
 	if (ret) {
 		printk("Failed to flush cache\n");
 		return 1;
@@ -138,9 +145,9 @@ int main(void)
 		return 1;
 	}
 
-	timestamps[TIMESTAMP_BEFORE_ONE_WIRE] = k_uptime_get();
+	timestamps[TIMESTAMP_BEFORE_ONE_WIRE] = k_cycle_get_32();
 	ret = mspi_transceive(controller, &dev_id, &one_wire_xfer);
-	timestamps[TIMESTAMP_AFTER_ONE_WIRE] = k_uptime_get();
+	timestamps[TIMESTAMP_AFTER_ONE_WIRE] = k_cycle_get_32();
 	if (ret) {
 		printk("Failed to send configuration\n");
 		return 1;
@@ -159,9 +166,9 @@ int main(void)
 		return 1;
 	}
 
-	timestamps[TIMESTAMP_BEFORE_DATA_BLOCK] = k_uptime_get();
+	timestamps[TIMESTAMP_BEFORE_DATA_BLOCK] = k_cycle_get_32();
 	ret = mspi_transceive(controller, &dev_id, &data_block_xfer);
-	timestamps[TIMESTAMP_AFTER_DATA_BLOCK] = k_uptime_get();
+	timestamps[TIMESTAMP_AFTER_DATA_BLOCK] = k_cycle_get_32();
 	if (ret) {
 		printk("Failed to send data\n");
 		return 1;
@@ -169,10 +176,15 @@ int main(void)
 
 	printk("MSPI test completed\n");
 
+	uint32_t one_wire_cycles = timestamps[TIMESTAMP_AFTER_ONE_WIRE] - timestamps[TIMESTAMP_BEFORE_ONE_WIRE];
+	uint32_t data_block_cycles = timestamps[TIMESTAMP_AFTER_DATA_BLOCK] - timestamps[TIMESTAMP_BEFORE_DATA_BLOCK];
+	uint32_t one_wire_us = k_cyc_to_us_floor32(one_wire_cycles);
+	uint32_t data_block_us = k_cyc_to_us_floor32(data_block_cycles);
+
 	printk("Stats:\n");
-	printk("One wire: %u ms\n", timestamps[TIMESTAMP_AFTER_ONE_WIRE] - timestamps[TIMESTAMP_BEFORE_ONE_WIRE]);
-	printk("Data block: %u ms\n", timestamps[TIMESTAMP_AFTER_DATA_BLOCK] - timestamps[TIMESTAMP_BEFORE_DATA_BLOCK]);
-	printk("Throughput: %u bytes/s\n", sizeof(data_block_data) * 1000 / (timestamps[TIMESTAMP_AFTER_DATA_BLOCK] - timestamps[TIMESTAMP_BEFORE_DATA_BLOCK]));
+	printk("One wire: %u cycles %u us\n", one_wire_cycles, one_wire_us);
+	printk("Data block: %u cycles %u us\n", data_block_cycles, data_block_us);
+	printk("Throughput: %u bytes/s\n", DATA_SIZE * 1000000 / data_block_us);
 
 	return 0;
 }
