@@ -3,6 +3,9 @@
 # Copyright (c) 2018 Nordic Semiconductor ASA
 # SPDX-License-Identifier: Apache-2.0
 
+config HAS_HW_NRF_CRACEN
+	def_bool $(dt_compat_enabled,$(DT_COMPAT_NORDIC_ENTROPY_CRACEN))
+
 config HAS_HW_NRF_ACL
 	def_bool $(dt_compat_enabled,$(DT_COMPAT_NORDIC_NRF_ACL))
 

@@ -23,6 +23,8 @@ manifest:
       url-base: https://github.com/zephyrproject-rtos
     - name: babblesim
       url-base: https://github.com/BabbleSim
+    - name: hubertmis
+      url-base: https://github.com/hubertmis
 
   group-filter: [-babblesim, -optional]
 
@@ -188,7 +190,8 @@ manifest:
       groups:
         - hal
     - name: hal_nordic
-      revision: 5c8d109371ebb740fbef1f440a3b59e488a36717
+      revision: test/cracen-entropy
+      remote: hubertmis
       path: modules/hal/nordic
       groups:
         - hal

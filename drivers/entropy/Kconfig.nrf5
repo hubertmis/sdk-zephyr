@@ -11,6 +11,17 @@ config ENTROPY_NRF_FORCE_ALT
 	  This option can be enabled to force an alternative implementation
 	  of the entropy driver.
 
+config ENTROPY_NRF5_CRACEN
+	bool "nRF5 CRACEN driver"
+	default y
+	depends on !ENTROPY_NRF_FORCE_ALT
+	depends on DT_HAS_NORDIC_ENTROPY_CRACEN_ENABLED
+	#depends on !PSA_CRYPTO_DRIVER_CRACEN
+	select ENTROPY_HAS_DRIVER
+	help
+	  This option enables the CRACEN peripheral, which is a true random
+	  number generator.
+
 menuconfig ENTROPY_NRF5_RNG
 	bool "nRF5 RNG driver"
 	default y
