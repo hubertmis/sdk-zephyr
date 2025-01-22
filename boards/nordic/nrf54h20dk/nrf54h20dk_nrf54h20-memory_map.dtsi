@@ -112,20 +112,20 @@
 			ranges = <0x0 0x2f890000 0x10000>;
 
 			cpuflpr_code_data: memory@0 {
-				reg = <0x0 DT_SIZE_K(46)>;
+				reg = <0x0 DT_SIZE_K(54)>;
 			};
 
 			cpuapp_cpuflpr_ipc_shm: memory@b800 {
-				reg = <0xb800 DT_SIZE_K(1)>;
+				reg = <0xd800 DT_SIZE_K(1)>;
 			};
 
 			cpuflpr_cpuapp_ipc_shm: memory@bc00 {
-				reg = <0xbc00 DT_SIZE_K(1)>;
+				reg = <0xdc00 DT_SIZE_K(1)>;
 			};
 
-			dma_fast_region: memory@c000 {
+			dma_fast_region: memory@e000 {
 				compatible = "zephyr,memory-region";
-				reg = <0xc000 DT_SIZE_K(16)>;
+				reg = <0xe000 DT_SIZE_K(8)>;
 				status = "disabled";
 				#memory-region-cells = <0>;
 				zephyr,memory-region = "DMA_RAM21";
@@ -207,15 +207,15 @@
 		#size-cells = <1>;
 
 		cpuapp_slot0_partition: partition@94000 {
-			reg = <0x94000 DT_SIZE_K(320)>;
+			reg = <0x94000 DT_SIZE_K(312)>;
 		};
 
 		cpuppr_code_partition: partition@e4000 {
-			reg = <0xe4000 DT_SIZE_K(64)>;
+			reg = <0xe2000 DT_SIZE_K(64)>;
 		};
 
 		cpuflpr_code_partition: partition@f4000 {
-			reg = <0xf4000 DT_SIZE_K(48)>;
+			reg = <0xf2000 DT_SIZE_K(56)>;
 		};
 	};
 
