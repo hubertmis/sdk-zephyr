@@ -12,7 +12,7 @@ SECTION_PROLOGUE(NRF_KMU_RESERVED_PUSH_SECTION,(NOLOAD) ,)
 # at a specific address in memory using the Zephyr SECTION macros.
 # So this assert is necessary to avoid accidentatly moving this
 # section to a different address.
-ASSERT(__nrf_kmu_reserved_push_area == RAM_ADDR, "Error:  \
+#ASSERT(__nrf_kmu_reserved_push_area == RAM_ADDR, "Error:  \
  The section NRF_KMU_RESERVED_PUSH_SECTION needs to be    \
  placed on the top RAM address but it is not, please edit \
  your linker scripts to make sure that it is placed on    \

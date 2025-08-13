@@ -6,3 +6,4 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lz4)
 
 target_sources(app PRIVATE src/main.c)
+zephyr_code_relocate(FILES src/main.c LOCATION RAM)
